@@ -1,0 +1,197 @@
+diff --git a/libobs-d3d11/CMakeLists.txt b/libobs-d3d11/CMakeLists.txt
+index a05dde6..14ff1f5 100644
+--- a/libobs-d3d11/CMakeLists.txt
++++ b/libobs-d3d11/CMakeLists.txt
+@@ -30,7 +30,26 @@ target_compile_definitions(
+   libobs-d3d11 PRIVATE $<$<BOOL:${GPU_PRIORITY_VAL}>:USE_GPU_PRIORITY>
+                        "$<IF:$<BOOL:${GPU_PRIORITY_VAL}>,GPU_PRIORITY_VAL=${GPU_PRIORITY_VAL},GPU_PRIORITY_VAL=0>")
+ 
+-target_link_libraries(libobs-d3d11 PRIVATE OBS::libobs d3d9 d3d11 d3dcompiler dxgi shcore)
++if(WIN32)
++  find_library(D3DCOMPILER_47_LIBRARY NAMES d3dcompiler_47)
++  if(D3DCOMPILER_47_LIBRARY)
++    set(D3DCOMPILER_LIBRARIES "${D3DCOMPILER_47_LIBRARY}" d3dcompiler)
++  else()
++    set(D3DCOMPILER_LIBRARIES d3dcompiler_47 d3dcompiler)
++  endif()
++else()
++  set(D3DCOMPILER_LIBRARIES d3dcompiler)
++endif()
++
++target_link_libraries(
++  libobs-d3d11
++  PRIVATE
++    OBS::libobs
++    d3d9
++    d3d11
++    ${D3DCOMPILER_LIBRARIES}
++    dxgi
++    shcore)
+ 
+ target_enable_feature(libobs "Direct3D 11 renderer")
+ 
+diff --git a/libobs-d3d11/d3d11-shader.cpp b/libobs-d3d11/d3d11-shader.cpp
+index 11e0f12..eb830d8 100644
+--- a/libobs-d3d11/d3d11-shader.cpp
++++ b/libobs-d3d11/d3d11-shader.cpp
+@@ -26,8 +26,118 @@
+ 
+ #include <filesystem>
+ #include <fstream>
++#include <mutex>
+ #include <d3dcompiler.h>
+ 
++namespace {
++
++using D3DCompileFunc = decltype(&D3DCompile);
++using D3DCreateBlobFunc = decltype(&D3DCreateBlob);
++#ifdef DISASSEMBLE_SHADERS
++using D3DDisassembleFunc = decltype(&D3DDisassemble);
++#endif
++
++struct D3DCompilerDispatch {
++	HMODULE module = nullptr;
++	D3DCompileFunc compile = nullptr;
++	D3DCreateBlobFunc create_blob = nullptr;
++#ifdef DISASSEMBLE_SHADERS
++	D3DDisassembleFunc disassemble = nullptr;
++#endif
++};
++
++static D3DCompilerDispatch g_d3dcompiler_dispatch;
++static std::once_flag g_d3dcompiler_once;
++
++static void LoadD3DCompiler()
++{
++	constexpr const wchar_t *kCompilerDlls[] = {
++		L"d3dcompiler_47.dll",
++		L"d3dcompiler_46.dll",
++		L"d3dcompiler_43.dll",
++	};
++
++	for (const auto *dll : kCompilerDlls) {
++		g_d3dcompiler_dispatch.module = LoadLibraryW(dll);
++		if (!g_d3dcompiler_dispatch.module)
++			continue;
++
++		g_d3dcompiler_dispatch.compile =
++			reinterpret_cast<D3DCompileFunc>(GetProcAddress(
++			g_d3dcompiler_dispatch.module, "D3DCompile"));
++		g_d3dcompiler_dispatch.create_blob =
++			reinterpret_cast<D3DCreateBlobFunc>(GetProcAddress(
++			g_d3dcompiler_dispatch.module, "D3DCreateBlob"));
++#ifdef DISASSEMBLE_SHADERS
++		g_d3dcompiler_dispatch.disassemble =
++			reinterpret_cast<D3DDisassembleFunc>(GetProcAddress(
++			g_d3dcompiler_dispatch.module, "D3DDisassemble"));
++#endif
++
++		if (g_d3dcompiler_dispatch.compile &&
++		    g_d3dcompiler_dispatch.create_blob
++#ifdef DISASSEMBLE_SHADERS
++		    && g_d3dcompiler_dispatch.disassemble
++#endif
++		)
++			return;
++
++		FreeLibrary(g_d3dcompiler_dispatch.module);
++		g_d3dcompiler_dispatch.module = nullptr;
++		g_d3dcompiler_dispatch.compile = nullptr;
++		g_d3dcompiler_dispatch.create_blob = nullptr;
++#ifdef DISASSEMBLE_SHADERS
++		g_d3dcompiler_dispatch.disassemble = nullptr;
++#endif
++	}
++}
++
++static bool EnsureD3DCompilerLoaded()
++{
++	std::call_once(g_d3dcompiler_once, LoadD3DCompiler);
++	return g_d3dcompiler_dispatch.compile &&
++	       g_d3dcompiler_dispatch.create_blob
++#ifdef DISASSEMBLE_SHADERS
++	       && g_d3dcompiler_dispatch.disassemble
++#endif
++	;
++}
++
++static HRESULT DispatchD3DCompile(const void *src_data, SIZE_T src_size,
++				     const char *source_name,
++				     const D3D_SHADER_MACRO *defines,
++				     ID3DInclude *include, const char *entry,
++				     const char *target, UINT flags1, UINT flags2,
++				     ID3DBlob **code, ID3DBlob **errors)
++{
++	if (!EnsureD3DCompilerLoaded())
++		return E_FAIL;
++	return g_d3dcompiler_dispatch.compile(src_data, src_size, source_name,
++						 defines, include, entry, target,
++						 flags1, flags2, code, errors);
++}
++
++static HRESULT DispatchD3DCreateBlob(SIZE_T size, ID3DBlob **blob)
++{
++	if (!EnsureD3DCompilerLoaded())
++		return E_FAIL;
++	return g_d3dcompiler_dispatch.create_blob(size, blob);
++}
++
++#ifdef DISASSEMBLE_SHADERS
++static HRESULT DispatchD3DDisassemble(const void *src_data, SIZE_T src_size,
++					 UINT flags, const char *comments,
++					 ID3DBlob **disassembly)
++{
++	if (!EnsureD3DCompilerLoaded())
++		return E_FAIL;
++	return g_d3dcompiler_dispatch.disassemble(src_data, src_size, flags,
++							 comments, disassembly);
++}
++#endif
++
++} // namespace
++
+ void gs_vertex_shader::GetBuffersExpected(
+ 	const vector<D3D11_INPUT_ELEMENT_DESC> &inputs)
+ {
+@@ -258,9 +368,12 @@ void gs_shader::Compile(const char *shaderString, const char *file,
+ 			cacheFile.seekg(0, ios::beg);
+ 
+ 			len -= sizeof(checksum);
+-			D3DCreateBlob(len, shader);
++			hr = DispatchD3DCreateBlob(len, shader);
++			if (FAILED(hr))
++				throw HRError("Failed to allocate shader cache blob",
++					     hr);
+ 			cacheFile.read((char *)(*shader)->GetBufferPointer(),
+-				       len);
++			       len);
+ 			uint64_t calculated_checksum = fnv1a_hash(
+ 				(char *)(*shader)->GetBufferPointer(), len);
+ 
+@@ -280,10 +393,10 @@ void gs_shader::Compile(const char *shaderString, const char *file,
+ 	}
+ 
+ 	if (!is_cached) {
+-		hr = D3DCompile(shaderString, shaderStrLen, file, NULL, NULL,
+-				"main", target,
+-				D3D10_SHADER_OPTIMIZATION_LEVEL3, 0, shader,
+-				errorsBlob.Assign());
++		hr = DispatchD3DCompile(shaderString, shaderStrLen, file, NULL,
++					 NULL, "main", target,
++					 D3D10_SHADER_OPTIMIZATION_LEVEL3, 0, shader,
++					 errorsBlob.Assign());
+ 		if (FAILED(hr)) {
+ 			if (errorsBlob != NULL && errorsBlob->GetBufferSize())
+ 				throw ShaderError(errorsBlob, hr);
+@@ -316,8 +429,9 @@ void gs_shader::Compile(const char *shaderString, const char *file,
+ #ifdef DISASSEMBLE_SHADERS
+ 	ComPtr<ID3D10Blob> asmBlob;
+ 
+-	hr = D3DDisassemble((*shader)->GetBufferPointer(),
+-			    (*shader)->GetBufferSize(), 0, nullptr, &asmBlob);
++	hr = DispatchD3DDisassemble((*shader)->GetBufferPointer(),
++				    (*shader)->GetBufferSize(), 0, nullptr,
++				    &asmBlob);
+ 
+ 	if (SUCCEEDED(hr) && !!asmBlob && asmBlob->GetBufferSize()) {
+ 		blog(LOG_INFO, "=============================================");

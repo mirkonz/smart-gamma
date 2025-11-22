@@ -1,0 +1,70 @@
+uniform float effect_strength;
+uniform float gamma_adjust;
+uniform float brightness_offset;
+uniform float contrast_adjust;
+uniform float saturation_adjust;
+
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+sampler_state imageSampler {
+  Filter = Linear;
+  AddressU = Clamp;
+  AddressV = Clamp;
+};
+
+struct VertInOut {
+  float4 pos : POSITION;
+  float2 uv : TEXCOORD0;
+};
+
+VertInOut VSDefault(VertInOut vert_in) {
+  VertInOut vert_out;
+  vert_out.pos = mul(float4(vert_in.pos.xyz, 1.0), ViewProj);
+  vert_out.uv = vert_in.uv;
+  return vert_out;
+}
+
+float3 apply_gamma(float3 color, float gamma_value) {
+  const float3 min_rgb = float3(1e-4, 1e-4, 1e-4);
+  float g = max(gamma_value, 0.001);
+  float3 exponent = float3(1.0 / g, 1.0 / g, 1.0 / g);
+  return pow(max(color, min_rgb), exponent);
+}
+
+float3 apply_brightness(float3 color, float offset) {
+  return color + float3(offset, offset, offset);
+}
+
+float3 apply_contrast(float3 color, float contrast_value) {
+  float3 pivot = float3(0.5, 0.5, 0.5);
+  return mad(color - pivot, contrast_value, pivot);
+}
+
+float3 apply_saturation(float3 color, float saturation_value) {
+  const float3 weights = float3(0.2126, 0.7152, 0.0722);
+  float luminance = dot(color, weights);
+  return lerp(float3(luminance, luminance, luminance), color, saturation_value);
+}
+
+float4 main_image(VertInOut v_in) : TARGET {
+  float4 source = image.Sample(imageSampler, v_in.uv);
+
+  float3 adjusted = source.rgb;
+  adjusted = apply_gamma(adjusted, gamma_adjust);
+  adjusted = apply_brightness(adjusted, brightness_offset);
+  adjusted = apply_contrast(adjusted, contrast_adjust);
+  adjusted = apply_saturation(adjusted, saturation_adjust);
+  adjusted = saturate(adjusted);
+
+  float strength = saturate(effect_strength);
+  float3 blended = lerp(source.rgb, adjusted, strength);
+  return float4(blended, source.a);
+}
+
+technique Draw {
+  pass {
+    vertex_shader = VSDefault(vert_in);
+    pixel_shader = main_image(v_in);
+  }
+}

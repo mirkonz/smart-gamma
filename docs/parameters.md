@@ -1,0 +1,14 @@
+# Smart Gamma Parameter Reference
+
+Canonical definitions for every setting exposed by the Smart Gamma filter. The same keys and defaults are used by the OBS UI (`smart-gamma/parameter_schema.hpp`) and the README table, so this is the single source of truth.
+
+| Setting | OBS Key | Range | Default | Description |
+| --- | --- | --- | --- | --- |
+| Darkness threshold | `darkness_threshold` | 0.00 – 1.00 | 0.35 | Normalized average luminance that triggers Smart Gamma when the scene stays darker than this value. |
+| Threshold duration | `activation_delay_ms` | 0 – 20000 ms | 600 ms | Minimum amount of time the scene must remain below the darkness threshold before fading in or above it before fading out. |
+| Fade in | `fade_in_ms` | 0 – 20000 ms | 200 ms | Duration of the fade from 0 to full effect once the scene is dark enough. |
+| Fade out | `fade_out_ms` | 0 – 20000 ms | 450 ms | Duration of the fade from full effect back to zero after the scene brightens. |
+| Gamma boost | `gamma` | 0.5 – 3.0 | 1.20 | Gamma multiplier used while Smart Gamma is active (higher values raise shadows). |
+| Brightness offset | `brightness` | -0.5 – 0.5 | 0.10 | Linear brightness offset added to all channels when the effect is active; keep this modest to avoid clipping. |
+| Contrast | `contrast` | 0.5 – 2.0 | 1.10 | Contrast gain applied alongside gamma to maintain highlight separation. |
+| Saturation | `saturation` | 0.0 – 2.5 | 1.00 | Optional saturation multiplier that can add extra color pop while the effect runs. |

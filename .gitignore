@@ -1,0 +1,40 @@
+# Build artifacts
+build/
+/build-*/
+!build-aux/
+build_macos/
+build_x64/
+build_x86_64/
+cmake/.CMakeBuildNumber
+/.deps/
+CMakeFiles/
+CMakeCache.txt
+cmake-build*/
+*.sln
+*.vcxproj*
+*.filters
+*.dir/
+*.obj
+*.pdb
+*.ilk
+*.dll
+*.lib
+*.exp
+*.dylib
+*.so
+*.ninja
+*.o
+*.a
+*.log
+
+# IDE metadata
+/.idea/
+/.vscode/
+*.code-workspace
+
+# macOS
+.DS_Store
+
+# Package outputs
+/dist/
+*.zip
