@@ -1,6 +1,6 @@
 <div align="center">
 <h1>Smart Gamma</h1>
-<h3>Automatic luminance-aware shader filter for OBS Studio</h3>
+<h3>Automatic brightness boost for dark scenes in OBS Studio</h3>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./smart-gamma-logo.png">
@@ -18,7 +18,7 @@
 ## Smart Gamma — OBS Shader Filter
 Smart Gamma is a single-pass GPU shader filter for OBS Studio. It samples scene luminance, applies gamma/brightness/contrast/saturation boosts when captures drop below a configurable threshold, and fades back as soon as things brighten up. The state machine drives everything through one `effect_strength` scalar, so the filter can stay idle without extra overhead.
 
-<img width="420" alt="Smart Gamma logo" src="./screenshot.jpg">
+<img width="420" alt="Smart Gamma logo" src="./smart-gamma-preview.small.gif">
 
 ### Key capabilities
 - **Automatic brightness guard:** Observes average luminance, applies a threshold + hold timer, and only engages when the scene stays dark long enough to justify extra gain.
