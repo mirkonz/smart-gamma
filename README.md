@@ -1,18 +1,41 @@
-# Smart Gamma — OBS Shader Filter
+<div align="center">
+<h1>Smart Gamma</h1>
+<h3>Automatic luminance-aware shader filter for OBS Studio</h3>
 
-**Smart Gamma** is a single-pass GPU shader filter for OBS Studio that watches scene luminance and automatically boosts gamma/brightness/contrast when gameplay turns dark, then fades back out once things brighten up.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./smart-gamma-logo.png">
+  <source media="(prefers-color-scheme: light)" srcset="./smart-gamma-logo.png">
+  <img width="420" alt="Smart Gamma logo" src="./smart-gamma-logo.png">
+</picture>
 
-## Highlights
-- GPU-first design: one shader pass with no per-frame heap churn and no GPU readbacks larger than 32×32.
-- Dynamic activation: configurable luminance threshold, hold time, and smooth fade-in/out envelopes.
-- Tunable adjustments: gamma boost, brightness offset, contrast recovery, and optional saturation tweak with sane defaults.
-- Cross-platform by design: builds on macOS (Apple Silicon + Intel) and Windows 64-bit from the same CMake project.
-- OBS-native UI & localization so settings show up exactly where creators expect them.
+[![GitHub](https://img.shields.io/github/license/mirkonz/obs-smart-gamma)](https://github.com/mirkonz/obs-smart-gamma/blob/main/LICENSE)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/mirkonz/obs-smart-gamma/push.yaml?branch=main&label=push)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/mirkonz/obs-smart-gamma)](https://github.com/mirkonz/obs-smart-gamma/releases/latest)
+![GitHub Release Date](https://img.shields.io/github/release-date/mirkonz/obs-smart-gamma?display_date=published_at)
+[![Total downloads](https://img.shields.io/github/downloads/mirkonz/obs-smart-gamma/total)](https://github.com/mirkonz/obs-smart-gamma/releases)
+</div>
+
+## Smart Gamma — OBS Shader Filter
+Smart Gamma is a single-pass GPU shader filter for OBS Studio. It samples scene luminance, applies gamma/brightness/contrast/saturation boosts when captures drop below a configurable threshold, and fades back as soon as things brighten up. The state machine drives everything through one `effect_strength` scalar, so the filter can stay idle without extra overhead.
+
+<img width="420" alt="Smart Gamma logo" src="./screenshot.jpg">
+
+### Key capabilities
+- **Automatic brightness guard:** Observes average luminance, applies a threshold + hold timer, and only engages when the scene stays dark long enough to justify extra gain.
+- **Unified parameter schema:** Darkness thresholds, fade envelopes, gamma/brightness/contrast, and optional saturation live in the same schema so the UI, localization, docs, and defaults never drift apart.
+- **Single-pass GPU work:** All adjustments stay inside one shader with no per-frame heap churn and no readbacks larger than 32×32, so the filter typically costs ~0.1 ms per frame at 1080p.
+
+### Design notes
+- **Smooth transitions:** Configurable fade-in/out curves and debounced thresholds prevent flicker during HUD flashes or sudden highlights.
+- **Cross-platform presets:** The same CMake project delivers Apple Silicon/Intel macOS bundles, Windows 64-bit plug-ins, and Ubuntu binaries via presets that match CI.
+- **Schema-driven docs:** `parameter_schema.hpp` powers runtime behaviour, localization strings, and documentation to keep terminology and defaults consistent.
 
 ## Platforms & Requirements
+Smart Gamma supports the same environments as modern OBS installations with shader filters enabled.
+
 - **Supported OS:** macOS 13+ (Intel & Apple Silicon), Windows 10/11 64-bit.
 - **OBS Studio:** 30.1 or newer (needs the modern libobs shader stack).
-- **GPU:** Any device that runs OBS Studio with shader filters enabled.
+- **GPU:** Any device that keeps OBS shader filters enabled.
 - **License:** MIT (see `LICENSE`).
 
 ## Parameter Reference
@@ -31,11 +54,7 @@ Parameters are defined once in [`include/smart-gamma/parameter_schema.hpp`](incl
 
 ### Using Smart Gamma
 - **Default behavior:** Smart Gamma does nothing until the average scene luminance falls below the darkness threshold for at least the threshold duration, and it waits the same duration above the threshold before fading back out. When you manually adjust gamma/brightness/contrast/saturation in the filter UI, they still take effect only while the automatic `effect_strength` scalar is non-zero, so the preview stays faithful when the environment is bright.
-- **Slider guidance:**
-  - **Darkness threshold:** Lower values make the filter trigger only on very dark scenes; raise it to catch dim but not fully black footage.
-  - **Threshold duration:** This is how long the scene must remain below the threshold before the filter starts fading in and how long it must stay above before fading out; setting it near 0 makes Smart Gamma responsive, while 20,000 ms (20 s) makes it very patient.
-  - **Fade in / Fade out:** These up-to-20 s envelopes control how smooth the transition is. Keep fade-in short to react quickly or long to avoid popping, fade-out longer if you want the correction to linger.
-  - **Gamma / Brightness / Contrast / Saturation:** Tune these only for the boosted state; the values blend from zero as `effect_strength` ramps from 0 → 1. High increases can quickly wash out highlights.
+- **Slider guidance:** Lower the darkness threshold to reserve the boost for truly dark scenes or raise it to catch dim but not fully black footage. The threshold duration controls how patient the filter is before reacting in either direction. Fade-in/out envelopes (up to 20 s) shape how cinematic the transition feels, while Gamma/Brightness/Contrast/Saturation tune the correction strength applied while active.
 
 ## How It Works
 1. **Luminance probe:** Each frame the filter downsamples the source texture to 32×32 on the GPU, stages that tiny texture once, and computes the Rec.709 luminance average. An exponential moving average (α = 0.18) keeps the signal stable.
@@ -43,7 +62,7 @@ Parameters are defined once in [`include/smart-gamma/parameter_schema.hpp`](incl
 3. **Shader blend:** The shader file at `data/shaders/smart-gamma.effect` applies gamma/brightness/contrast/saturation adjustments and lerps with the original frame based on `effect_strength`. Strength 0 returns the untouched frame; strength 1 applies the full correction.
 
 ## Building from Source
-Smart Gamma now mirrors the official [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate) layout. `buildspec.json` pins the OBS/libobs + dependency revisions and the helper modules in `cmake/` wire them up automatically, so building only requires choosing the preset that matches your host OS. The first configure run downloads everything into `.deps/`.
+Smart Gamma mirrors the official [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate) layout. `buildspec.json` pins the OBS/libobs + dependency revisions and the helper modules in `cmake/` wire them up automatically, so building only requires choosing the preset that matches your host OS. The first configure run downloads everything into `.deps/`.
 
 ### macOS (Xcode 16+)
 ```bash
@@ -87,7 +106,7 @@ Create three quick OBS scenes to validate behaviour.
 Monitor the OBS stats dock; Smart Gamma should stay under 0.1 ms/frame at 1080p on modern GPUs.
 
 ## Continuous Integration
-The new template-driven workflows under `.github/workflows/` (`push.yaml`, `pr-pull.yaml`, and `dispatch.yaml`) call into `build-project.yaml` and `check-format.yaml`, so CI reuses the exact presets listed above to fetch dependencies, build macOS/Windows/Ubuntu artifacts, and run clang-format + gersemi.
+Template-driven workflows under `.github/workflows/` (`push.yaml`, `pr-pull.yaml`, `dispatch.yaml`, and helpers) call into `build-project.yaml` and `check-format.yaml`, so CI reuses the exact presets listed above to fetch dependencies, build macOS/Windows/Ubuntu artifacts, and run clang-format + gersemi.
 
 ## Roadmap
 See [`plan.md`](plan.md) for future shader-focused tasks (per-source profiles, calibration wizard, HUD masking, ML experiments, etc.). Feel free to PR improvements there.
