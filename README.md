@@ -95,7 +95,7 @@ Linux builds use Ninja with `RelWithDebInfo` and install the `.so` into `dist/li
 
 ### Packaging
 - macOS: the install step already emits `smart-gamma.pkg`; wrap it in a DMG with `scripts/create-dmg.sh "<install-prefix>" dist/smart-gamma-macos.dmg` if desired.
-- Windows: `powershell ./scripts/create-windows-installer.ps1 -SourceDir dist/windows-x64 -OutputExe dist/smart-gamma-windows.exe`.
+- Windows: releases now ship a `smart-gamma-<version>-windows-x64.exe` installer. Generate the same installer locally by running `powershell ./scripts/create-windows-installer.ps1 -SourceDir dist/windows-x64 -OutputExe dist/smart-gamma-windows.exe`.
 - Any platform: `scripts/package.sh <build-dir> <platform-tag> [output-dir]` zips an install tree (e.g., `scripts/package.sh build_x86_64 linux-x86_64 dist`).
 
 ## Testing Checklist

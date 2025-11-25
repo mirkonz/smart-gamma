@@ -48,24 +48,33 @@ function Package {
     $ProductVersion = $BuildSpec.version
 
     $OutputName = "${ProductName}-${ProductVersion}-windows-${Target}"
+    $InstallerScript = "${ProjectRoot}/scripts/create-windows-installer.ps1"
+    $InstallDir = "${ProjectRoot}/release/${Configuration}"
+    $OutputExe = "${ProjectRoot}/release/${OutputName}.exe"
 
-    $RemoveArgs = @{
+    $CleanArgs = @{
         ErrorAction = 'SilentlyContinue'
         Path = @(
-            "${ProjectRoot}/release/${ProductName}-*-windows-*.zip"
+            "${ProjectRoot}/release/${ProductName}-*-windows-*.zip",
+            $OutputExe
         )
     }
 
-    Remove-Item @RemoveArgs
+    Remove-Item @CleanArgs
 
-    Log-Group "Archiving ${ProductName}..."
-    $CompressArgs = @{
-        Path = (Get-ChildItem -Path "${ProjectRoot}/release/${Configuration}" -Exclude "${OutputName}*.*")
-        CompressionLevel = 'Optimal'
-        DestinationPath = "${ProjectRoot}/release/${OutputName}.zip"
-        Verbose = ($Env:CI -ne $null)
+    if ( -not (Test-Path $InstallDir) ) {
+        throw "Install directory ${InstallDir} missing; run the build step first."
     }
-    Compress-Archive -Force @CompressArgs
+
+    if ( -not (Test-Path $InstallerScript) ) {
+        throw "Installer helper ${InstallerScript} not found."
+    }
+
+    Log-Group "Packaging ${ProductName} installer..."
+    & "$InstallerScript" `
+        -SourceDir "$InstallDir" `
+        -OutputExe "$OutputExe" `
+        -ProductName "$ProductName"
     Log-Group
 }
 

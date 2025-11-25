@@ -36,12 +36,18 @@ if (-not (Test-Path $SourceDir)) {
     exit 1
 }
 
+$resolvedSourceDir = (Resolve-Path -Path $SourceDir).ProviderPath
+
 Write-Host "Preparing Smart Gamma installer..."
 
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
 New-Item -ItemType Directory -Path $tempDir | Out-Null
 
-$resolvedOutputExe = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $OutputExe))
+$resolvedOutputExe = if ([System.IO.Path]::IsPathRooted($OutputExe)) {
+    [System.IO.Path]::GetFullPath($OutputExe)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $OutputExe))
+}
 $outputDir = Split-Path -Parent $resolvedOutputExe
 if ($outputDir -and -not (Test-Path $outputDir)) {
     New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
@@ -56,7 +62,7 @@ try {
 
     $zipPath = Join-Path $packageDir "smart-gamma.zip"
     Write-Host "Compressing payload from $SourceDir..."
-    Compress-Archive -Path (Join-Path $SourceDir "*") -DestinationPath $zipPath -Force
+    Compress-Archive -Path (Join-Path $resolvedSourceDir "*") -DestinationPath $zipPath -Force
     $zipPath = [System.IO.Path]::GetFullPath($zipPath)
 
     $stubPath = Join-Path $tempDir "InstallerStub.cs"
