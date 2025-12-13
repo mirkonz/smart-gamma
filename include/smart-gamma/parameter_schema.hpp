@@ -29,7 +29,7 @@ struct ParameterDescriptor {
 
 inline constexpr std::array<ParameterDescriptor, static_cast<std::size_t>(Parameter::Count)> kParameterDescriptors{{
 	{"darkness_threshold", "SmartGamma.Param.DarknessThreshold", "SmartGamma.Param.DarknessThreshold.Description",
-	 0.0, 100.0, 1.0, 35.0},
+	 0.0, 100.0, 0.01, 35.0},
 	{"activation_delay_ms", "SmartGamma.Param.ThresholdDuration", "SmartGamma.Param.ThresholdDuration.Description",
 	 0.0, 20000.0, 10.0, 600.0},
 	{"fade_in_ms", "SmartGamma.Param.FadeIn", "SmartGamma.Param.FadeIn.Description", 0.0, 20000.0, 10.0, 200.0},
