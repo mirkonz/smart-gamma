@@ -4,7 +4,7 @@ Canonical definitions for every setting exposed by the Smart Gamma filter. The s
 
 | Setting | OBS Key | Range | Default | Description |
 | --- | --- | --- | --- | --- |
-| Darkness threshold | `darkness_threshold` | 0.00 – 1.00 | 0.35 | Normalized average luminance that triggers Smart Gamma when the scene stays darker than this value. |
+| Darkness threshold | `darkness_threshold` | 0 – 100 % | 35 % | Average normalized luminance (expressed as a percentage between pure black and pure white) that triggers Smart Gamma when the scene stays darker than this value. |
 | Threshold duration | `activation_delay_ms` | 0 – 20000 ms | 600 ms | Minimum amount of time the scene must remain below the darkness threshold before fading in or above it before fading out. |
 | Fade in | `fade_in_ms` | 0 – 20000 ms | 200 ms | Duration of the fade from 0 to full effect once the scene is dark enough. |
 | Fade out | `fade_out_ms` | 0 – 20000 ms | 450 ms | Duration of the fade from full effect back to zero after the scene brightens. |

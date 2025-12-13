@@ -1,6 +1,9 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <string>
 
@@ -47,7 +50,7 @@ enum class SmartGammaState {
 
 struct SmartGammaSettings {
 	float darkness_threshold =
-		static_cast<float>(smart_gamma::DefaultValue(smart_gamma::Parameter::DarknessThreshold));
+		static_cast<float>(smart_gamma::DefaultValue(smart_gamma::Parameter::DarknessThreshold)) / 100.0f;
 	float threshold_duration_ms =
 		static_cast<float>(smart_gamma::DefaultValue(smart_gamma::Parameter::ThresholdDurationMs));
 	float fade_in_ms = static_cast<float>(smart_gamma::DefaultValue(smart_gamma::Parameter::FadeInMs));
@@ -81,6 +84,8 @@ struct SmartGammaFilter {
 	float time_above_threshold = 0.0f;
 	bool luminance_initialized = false;
 	float time_since_last_sample = 0.0f;
+	std::atomic<float> displayed_luminance_percent{100.0f};
+	float last_properties_update_percent = -1.0f;
 };
 
 inline float clamp01(float value)
@@ -179,6 +184,8 @@ void ResetState(SmartGammaFilter *filter)
 	filter->pending_tick_delta = 0.0f;
 	filter->luminance_initialized = false;
 	filter->time_since_last_sample = 0.0f;
+	filter->displayed_luminance_percent.store(100.0f, std::memory_order_relaxed);
+	filter->last_properties_update_percent = -1.0f;
 }
 
 void UpdateSettingsFromObs(SmartGammaFilter *filter, obs_data_t *settings)
@@ -190,9 +197,18 @@ void UpdateSettingsFromObs(SmartGammaFilter *filter, obs_data_t *settings)
 		const auto &descriptor = smart_gamma::kParameterDescriptors[i];
 		const double value = obs_data_get_double(settings, descriptor.settings_key);
 		switch (static_cast<smart_gamma::Parameter>(i)) {
-		case smart_gamma::Parameter::DarknessThreshold:
-			filter->settings.darkness_threshold = static_cast<float>(value);
+		case smart_gamma::Parameter::DarknessThreshold: {
+			const float stored_value = static_cast<float>(value);
+			if (stored_value <= 1.0f) {
+				// Older builds stored the normalized 0-1 value directly; preserve that scale and migrate.
+				filter->settings.darkness_threshold = clamp01(stored_value);
+				obs_data_set_double(settings, descriptor.settings_key,
+						    static_cast<double>(filter->settings.darkness_threshold * 100.0f));
+			} else {
+				filter->settings.darkness_threshold = stored_value / 100.0f;
+			}
 			break;
+		}
 		case smart_gamma::Parameter::ThresholdDurationMs:
 			filter->settings.threshold_duration_ms = static_cast<float>(value);
 			break;
@@ -293,6 +309,23 @@ float SampleLuminance(SmartGammaFilter *filter)
 	return filter->latest_luminance;
 }
 
+void MaybeUpdateLuminanceDisplay(SmartGammaFilter *filter)
+{
+	if (!filter || !filter->context)
+		return;
+
+	const float percent = clamp01(filter->smoothed_luminance) * 100.0f;
+	filter->displayed_luminance_percent.store(percent, std::memory_order_relaxed);
+
+	const bool needs_refresh = filter->last_properties_update_percent < 0.0f ||
+				   std::fabs(percent - filter->last_properties_update_percent) >= 0.5f;
+	if (!needs_refresh)
+		return;
+
+	filter->last_properties_update_percent = percent;
+	obs_source_update_properties(filter->context);
+}
+
 void UpdateStateMachine(SmartGammaFilter *filter, float delta_seconds, float luminance)
 {
 	if (!filter)
@@ -375,6 +408,8 @@ void UpdateStateMachine(SmartGammaFilter *filter, float delta_seconds, float lum
 		}
 		break;
 	}
+
+	MaybeUpdateLuminanceDisplay(filter);
 }
 
 void UploadShaderParams(SmartGammaFilter *filter)
@@ -472,9 +507,10 @@ void SmartGammaRender(void *data, gs_effect_t * /*effect*/)
 	obs_source_process_filter_end(filter->context, filter->effect, 0, 0);
 }
 
-obs_properties_t *SmartGammaProperties(void * /*data*/)
+obs_properties_t *SmartGammaProperties(void *data)
 {
 	obs_properties_t *props = obs_properties_create();
+	auto *filter = static_cast<SmartGammaFilter *>(data);
 
 	const char *usage_title = obs_module_text("SmartGamma.UsageTitle");
 	const char *usage_text = obs_module_text("SmartGamma.UsageText");
@@ -483,6 +519,22 @@ obs_properties_t *SmartGammaProperties(void * /*data*/)
 		obs_property_set_long_description(usage_prop, usage_text);
 		obs_property_text_set_info_word_wrap(usage_prop, true);
 		obs_property_set_enabled(usage_prop, false);
+	}
+
+	const char *current_label = obs_module_text("SmartGamma.Param.CurrentLuminance");
+	obs_property_t *current_luminance_prop =
+		obs_properties_add_text(props, "smart_gamma_current_luminance", current_label, OBS_TEXT_INFO);
+	if (current_luminance_prop) {
+		const float percent = filter ? filter->displayed_luminance_percent.load(std::memory_order_relaxed)
+					     : 0.0f;
+		const char *format = obs_module_text("SmartGamma.Param.CurrentLuminance.Value");
+		if (!format || format[0] == '\0')
+			format = "Detected brightness: %.1f%%";
+		char buffer[96];
+		std::snprintf(buffer, sizeof(buffer), format, percent);
+		obs_property_set_long_description(current_luminance_prop, buffer);
+		obs_property_set_enabled(current_luminance_prop, false);
+		obs_property_text_set_info_word_wrap(current_luminance_prop, true);
 	}
 
 	for (const auto &descriptor : smart_gamma::kParameterDescriptors) {

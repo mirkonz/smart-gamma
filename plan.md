@@ -38,7 +38,7 @@ This file instructs autonomous AI agents and human developers on how to build th
 # 🏗 Section 1 — Project Overview & Architecture Choice
 
 - [x] Confirm plugin display name: **Smart Gamma**
-- [x] Confirm repo name: **obs-smart-gamma**
+- [x] Confirm repo name: **smart-gamma**
 - [x] Write one-sentence elevator pitch for README
 - [x] Define target platforms:
   - [x] macOS (Apple Silicon + Intel if possible)
@@ -53,7 +53,7 @@ This file instructs autonomous AI agents and human developers on how to build th
 
 # 📁 Section 2 — Repository & Project Setup
 
-- [x] Create GitHub repository `obs-smart-gamma`
+- [x] Create GitHub repository `smart-gamma`
 - [x] Initialize repository with:
   - [x] `README.md`
   - [x] `LICENSE`

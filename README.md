@@ -43,7 +43,7 @@ Parameters are defined once in [`include/smart-gamma/parameter_schema.hpp`](incl
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| Darkness threshold | `0.35` | Normalized average luminance required to trigger Smart Gamma. |
+| Darkness threshold | `35%` | Average normalized luminance (expressed as a percentage between black and white) required to trigger Smart Gamma. |
 | Threshold duration (ms) | `600` | Time the scene must stay below (to fade in) or above (to fade back out) the darkness threshold before Smart Gamma reacts. |
 | Fade in (ms) | `200` | Duration of the fade from 0 to full strength once active. |
 | Fade out (ms) | `450` | Duration of the fade when returning to normal brightness. |
@@ -54,7 +54,7 @@ Parameters are defined once in [`include/smart-gamma/parameter_schema.hpp`](incl
 
 ### Using Smart Gamma
 - **Default behavior:** Smart Gamma does nothing until the average scene luminance falls below the darkness threshold for at least the threshold duration, and it waits the same duration above the threshold before fading back out. When you manually adjust gamma/brightness/contrast/saturation in the filter UI, they still take effect only while the automatic `effect_strength` scalar is non-zero, so the preview stays faithful when the environment is bright.
-- **Slider guidance:** Lower the darkness threshold to reserve the boost for truly dark scenes or raise it to catch dim but not fully black footage. The threshold duration controls how patient the filter is before reacting in either direction. Fade-in/out envelopes (up to 20 s) shape how cinematic the transition feels, while Gamma/Brightness/Contrast/Saturation tune the correction strength applied while active.
+- **Slider guidance:** Lower the darkness threshold to reserve the boost for truly dark scenes or raise it to catch dim but not fully black footage. A read-only indicator above the slider shows the current averaged luminance percentage so you can match the threshold quickly. The threshold duration controls how patient the filter is before reacting in either direction. Fade-in/out envelopes (up to 20 s) shape how cinematic the transition feels, while Gamma/Brightness/Contrast/Saturation tune the correction strength applied while active.
 
 ## How It Works
 1. **Luminance probe:** Each frame the filter downsamples the source texture to 32×32 on the GPU, stages that tiny texture once, and computes the Rec.709 luminance average. An exponential moving average (α = 0.18) keeps the signal stable.
