@@ -32,6 +32,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("smart-gamma", "en-US")
 #endif
 
 constexpr char kAuthorWebsite[] = "https://mirko.nz";
+constexpr char kDarknessThresholdPercentKey[] = "darkness_threshold_is_percent";
 
 constexpr uint32_t kDefaultDownsampleSize = 32;
 constexpr float kLuminanceSmoothing = 0.18f;
@@ -198,14 +199,17 @@ void UpdateSettingsFromObs(SmartGammaFilter *filter, obs_data_t *settings)
 		const double value = obs_data_get_double(settings, descriptor.settings_key);
 		switch (static_cast<smart_gamma::Parameter>(i)) {
 		case smart_gamma::Parameter::DarknessThreshold: {
+			const bool stored_as_percent = obs_data_get_bool(settings, kDarknessThresholdPercentKey);
 			const float stored_value = static_cast<float>(value);
-			if (stored_value <= 1.0f) {
-				// Older builds stored the normalized 0-1 value directly; preserve that scale and migrate.
+			if (stored_as_percent || stored_value > 1.0f) {
+				filter->settings.darkness_threshold = stored_value / 100.0f;
+				obs_data_set_bool(settings, kDarknessThresholdPercentKey, true);
+			} else {
+				// Older builds stored the normalized 0-1 value directly; preserve that scale and migrate once.
 				filter->settings.darkness_threshold = clamp01(stored_value);
 				obs_data_set_double(settings, descriptor.settings_key,
 						    static_cast<double>(filter->settings.darkness_threshold * 100.0f));
-			} else {
-				filter->settings.darkness_threshold = stored_value / 100.0f;
+				obs_data_set_bool(settings, kDarknessThresholdPercentKey, true);
 			}
 			break;
 		}
@@ -571,6 +575,7 @@ void SmartGammaDefaults(obs_data_t *settings)
 	for (const auto &descriptor : smart_gamma::kParameterDescriptors) {
 		obs_data_set_default_double(settings, descriptor.settings_key, descriptor.default_value);
 	}
+	obs_data_set_default_bool(settings, kDarknessThresholdPercentKey, true);
 }
 
 obs_source_info BuildSourceInfo()
