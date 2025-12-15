@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -74,6 +75,7 @@ struct SmartGammaFilter {
 	gs_texrender_t *downsample_render = nullptr;
 	gs_stagesurf_t *downsample_stage = nullptr;
 	uint32_t downsample_size = kDefaultDownsampleSize;
+	enum gs_color_format downsample_format = GS_RGBA;
 
 	SmartGammaSettings settings;
 	SmartGammaState state = SmartGammaState::Idle;
@@ -99,10 +101,100 @@ inline float lerp(float a, float b, float t)
 	return a + (b - a) * t;
 }
 
+float HalfToFloat(uint16_t value)
+{
+	const uint16_t sign = value >> 15;
+	const uint16_t exponent = (value >> 10) & 0x1F;
+	const uint16_t mantissa = value & 0x03FF;
+
+	float result = 0.0f;
+	if (exponent == 0) {
+		if (mantissa != 0) {
+			result = std::ldexp(static_cast<float>(mantissa) / 1024.0f, -14);
+		}
+	} else if (exponent == 0x1F) {
+		result = mantissa ? std::numeric_limits<float>::quiet_NaN() : std::numeric_limits<float>::infinity();
+	} else {
+		result = std::ldexp(1.0f + static_cast<float>(mantissa) / 1024.0f, static_cast<int>(exponent) - 15);
+	}
+
+	return sign ? -result : result;
+}
+
+bool IsHdrFormat(enum gs_color_format format)
+{
+	return format == GS_RGBA16F;
+}
+
+bool IsBgraFormat(enum gs_color_format format)
+{
+	switch (format) {
+	case GS_BGRA:
+	case GS_BGRX:
+	case GS_BGRA_UNORM:
+	case GS_BGRX_UNORM:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool IsRgbaFormat(enum gs_color_format format)
+{
+	switch (format) {
+	case GS_RGBA:
+	case GS_RGBA_UNORM:
+		return true;
+	default:
+		return false;
+	}
+}
+
 std::string GetShaderPath()
 {
 	const char *path = obs_module_file("shaders/smart-gamma.effect");
 	return path ? path : std::string{};
+}
+
+void DestroyDownsampleSurfaces(SmartGammaFilter *filter)
+{
+	if (!filter)
+		return;
+
+	if (filter->downsample_render) {
+		gs_texrender_destroy(filter->downsample_render);
+		filter->downsample_render = nullptr;
+	}
+
+	if (filter->downsample_stage) {
+		gs_stagesurface_destroy(filter->downsample_stage);
+		filter->downsample_stage = nullptr;
+	}
+}
+
+bool EnsureDownsampleSurfaces(SmartGammaFilter *filter, enum gs_color_format format)
+{
+	if (!filter)
+		return false;
+
+	if (filter->downsample_render && filter->downsample_stage && filter->downsample_format == format)
+		return true;
+
+	DestroyDownsampleSurfaces(filter);
+
+	filter->downsample_render = gs_texrender_create(format, GS_ZS_NONE);
+	filter->downsample_stage =
+		gs_stagesurface_create(filter->downsample_size, filter->downsample_size, gs_generalize_format(format));
+	if (filter->downsample_stage)
+		filter->downsample_format = gs_stagesurface_get_color_format(filter->downsample_stage);
+	else
+		filter->downsample_format = GS_RGBA;
+	if (!filter->downsample_render || !filter->downsample_stage) {
+		DestroyDownsampleSurfaces(filter);
+		return false;
+	}
+
+	return true;
 }
 
 void DestroyGraphicsResources(SmartGammaFilter *filter)
@@ -121,15 +213,7 @@ void DestroyGraphicsResources(SmartGammaFilter *filter)
 		filter->saturation_param = nullptr;
 	}
 
-	if (filter->downsample_render) {
-		gs_texrender_destroy(filter->downsample_render);
-		filter->downsample_render = nullptr;
-	}
-
-	if (filter->downsample_stage) {
-		gs_stagesurface_destroy(filter->downsample_stage);
-		filter->downsample_stage = nullptr;
-	}
+	DestroyDownsampleSurfaces(filter);
 	obs_leave_graphics();
 }
 
@@ -141,12 +225,7 @@ bool CreateGraphicsResources(SmartGammaFilter *filter)
 	bool success = true;
 	obs_enter_graphics();
 
-	filter->downsample_render = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
-	if (!filter->downsample_render)
-		success = false;
-
-	filter->downsample_stage = gs_stagesurface_create(filter->downsample_size, filter->downsample_size, GS_RGBA);
-	if (!filter->downsample_stage)
+	if (!EnsureDownsampleSurfaces(filter, GS_RGBA))
 		success = false;
 
 	if (success) {
@@ -185,6 +264,7 @@ void ResetState(SmartGammaFilter *filter)
 	filter->pending_tick_delta = 0.0f;
 	filter->luminance_initialized = false;
 	filter->time_since_last_sample = 0.0f;
+	filter->downsample_format = GS_RGBA;
 	filter->displayed_luminance_percent.store(100.0f, std::memory_order_relaxed);
 	filter->last_properties_update_percent = -1.0f;
 }
@@ -253,6 +333,9 @@ float SampleLuminance(SmartGammaFilter *filter)
 	const enum gs_color_space preferred_spaces[] = {GS_CS_SRGB, GS_CS_SRGB_16F, GS_CS_709_EXTENDED};
 	const enum gs_color_space source_space =
 		obs_source_get_color_space(target, OBS_COUNTOF(preferred_spaces), preferred_spaces);
+	const enum gs_color_format required_format = gs_get_format_from_space(source_space);
+	if (!EnsureDownsampleSurfaces(filter, required_format))
+		return filter->latest_luminance;
 
 	const uint32_t size = filter->downsample_size;
 	float luminance = filter->latest_luminance;
@@ -271,10 +354,22 @@ float SampleLuminance(SmartGammaFilter *filter)
 		const bool custom_draw = (parent_flags & OBS_SOURCE_CUSTOM_DRAW) != 0;
 		const bool async = (parent_flags & OBS_SOURCE_ASYNC) != 0;
 
+		gs_matrix_push();
+		gs_matrix_identity();
+		const uint32_t source_width = obs_source_get_base_width(target);
+		const uint32_t source_height = obs_source_get_base_height(target);
+		if (source_width > 0 && source_height > 0) {
+			const float scale_x = static_cast<float>(size) / static_cast<float>(source_width);
+			const float scale_y = static_cast<float>(size) / static_cast<float>(source_height);
+			gs_matrix_scale3f(scale_x, scale_y, 1.0f);
+		}
+
 		if (target == parent && !custom_draw && !async)
 			obs_source_default_render(target);
 		else
 			obs_source_video_render(target);
+
+		gs_matrix_pop();
 
 		gs_texrender_end(filter->downsample_render);
 	}
@@ -284,18 +379,42 @@ float SampleLuminance(SmartGammaFilter *filter)
 	gs_texture_t *downsampled = gs_texrender_get_texture(filter->downsample_render);
 	if (downsampled) {
 		gs_stage_texture(filter->downsample_stage, downsampled);
+		gs_flush();
 		uint8_t *data = nullptr;
 		uint32_t linesize = 0;
 		if (gs_stagesurface_map(filter->downsample_stage, &data, &linesize)) {
-			const double scale = 1.0 / 255.0;
+			const bool hdr_format = IsHdrFormat(filter->downsample_format);
+			const bool bgra_format = IsBgraFormat(filter->downsample_format);
+			const bool rgba_format = IsRgbaFormat(filter->downsample_format);
+			const uint32_t pixel_stride = hdr_format ? 8u : 4u;
+			const double ldr_scale = 1.0 / 255.0;
 			double accum = 0.0;
 			for (uint32_t y = 0; y < size; ++y) {
 				const uint8_t *row = data + (static_cast<size_t>(y) * linesize);
 				for (uint32_t x = 0; x < size; ++x) {
-					const uint8_t *pixel = row + x * 4;
-					const double r = static_cast<double>(pixel[0]) * scale;
-					const double g = static_cast<double>(pixel[1]) * scale;
-					const double b = static_cast<double>(pixel[2]) * scale;
+					const uint8_t *pixel = row + static_cast<size_t>(x) * pixel_stride;
+					float r = 0.0f;
+					float g = 0.0f;
+					float b = 0.0f;
+					if (hdr_format) {
+						const auto *channels = reinterpret_cast<const uint16_t *>(pixel);
+						r = clamp01(HalfToFloat(channels[0]));
+						g = clamp01(HalfToFloat(channels[1]));
+						b = clamp01(HalfToFloat(channels[2]));
+					} else if (bgra_format) {
+						r = static_cast<float>(pixel[2]) * static_cast<float>(ldr_scale);
+						g = static_cast<float>(pixel[1]) * static_cast<float>(ldr_scale);
+						b = static_cast<float>(pixel[0]) * static_cast<float>(ldr_scale);
+					} else if (rgba_format) {
+						r = static_cast<float>(pixel[0]) * static_cast<float>(ldr_scale);
+						g = static_cast<float>(pixel[1]) * static_cast<float>(ldr_scale);
+						b = static_cast<float>(pixel[2]) * static_cast<float>(ldr_scale);
+					} else {
+						// Fallback: assume first three channels are RGB order
+						r = static_cast<float>(pixel[0]) * static_cast<float>(ldr_scale);
+						g = static_cast<float>(pixel[1]) * static_cast<float>(ldr_scale);
+						b = static_cast<float>(pixel[2]) * static_cast<float>(ldr_scale);
+					}
 					accum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
 				}
 			}
