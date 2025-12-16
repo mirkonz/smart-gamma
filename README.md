@@ -21,7 +21,7 @@ Smart Gamma is a single-pass GPU shader filter for OBS Studio. It samples scene 
 <img width="420" alt="Smart Gamma logo" src="./smart-gamma-preview.small.gif">
 
 ### Key capabilities
-- **Automatic brightness guard:** Observes average luminance, applies a threshold + hold timer, and only engages when the scene stays dark long enough to justify extra gain.
+- **Adaptive brightness modes:** Auto brightness (default) scales effect strength smoothly as scenes drop below the darkness threshold, while Threshold fade keeps the manual trigger/hold/fade workflow when you need strict holds.
 - **Unified parameter schema:** Darkness thresholds, fade envelopes, gamma/brightness/contrast, and optional saturation live in the same schema so the UI, localization, docs, and defaults never drift apart.
 - **Single-pass GPU work:** All adjustments stay inside one shader with no per-frame heap churn and no readbacks larger than 32×32, so the filter typically costs ~0.1 ms per frame at 1080p.
 
@@ -43,22 +43,23 @@ Parameters are defined once in [`include/smart-gamma/parameter_schema.hpp`](incl
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| Darkness threshold | `35%` | Average normalized luminance (expressed as a percentage between black and white) required to trigger Smart Gamma. |
-| Threshold duration (ms) | `600` | Time the scene must stay below (to fade in) or above (to fade back out) the darkness threshold before Smart Gamma reacts. |
-| Fade in (ms) | `200` | Duration of the fade from 0 to full strength once active. |
-| Fade out (ms) | `450` | Duration of the fade when returning to normal brightness. |
-| Gamma boost | `1.20` | Gamma multiplier applied while active. |
-| Brightness offset | `0.10` | Linear brightness offset (use small values to avoid clipping). |
-| Contrast | `1.10` | Contrast gain to keep highlights alive after the gamma boost. |
-| Saturation | `1.00` | Optional saturation multiplier while the effect is active. |
+| Mode | `Auto brightness` | Auto brightness scales the effect based on how far below the threshold the scene sits. Switch to Threshold fade to restore the original trigger → hold → fade behavior (and reveal the timing sliders). |
+| Darkness threshold | `35%` | Average normalized luminance (expressed as a percentage between black and white) required before Auto brightness begins scaling or Threshold fade can trigger. |
+| Threshold duration (ms) | `600` | Time the scene must stay below (to fade in) or above (to fade back out) the darkness threshold before Smart Gamma reacts; available only in Threshold fade mode. |
+| Fade in (ms) | `200` | Duration of the fade from 0 to full strength once active (Threshold fade mode). |
+| Fade out (ms) | `450` | Duration of the fade when returning to normal brightness (Threshold fade mode). |
+| Gamma boost | `1.20` | Gamma multiplier at full strength; Auto brightness ramps toward this as the scene darkens. |
+| Brightness offset | `0.10` | Linear brightness offset (use small values to avoid clipping); represents the maximum offset applied when the scene is black. |
+| Contrast | `1.10` | Contrast gain to keep highlights alive after the gamma boost at full strength. |
+| Saturation | `1.00` | Optional saturation multiplier applied as the effect strength rises. |
 
 ### Using Smart Gamma
-- **Default behavior:** Smart Gamma does nothing until the average scene luminance falls below the darkness threshold for at least the threshold duration, and it waits the same duration above the threshold before fading back out. When you manually adjust gamma/brightness/contrast/saturation in the filter UI, they still take effect only while the automatic `effect_strength` scalar is non-zero, so the preview stays faithful when the environment is bright.
-- **Slider guidance:** Lower the darkness threshold to reserve the boost for truly dark scenes or raise it to catch dim but not fully black footage. A read-only indicator above the slider shows the current averaged luminance percentage (toggleable via “Show detected brightness”) so you can match the threshold quickly. The threshold duration controls how patient the filter is before reacting in either direction. Fade-in/out envelopes (up to 20 s) shape how cinematic the transition feels, while Gamma/Brightness/Contrast/Saturation tune the correction strength applied while active.
+- **Default behavior:** Auto brightness reads the smoothed luminance, compares it to the darkness threshold, and scales `effect_strength` between 0 and 1 as the scene darkens. When the scene is pitch black you reach the exact gamma/brightness/contrast/saturation values configured, and brighter scenes only get a proportional subset so things never blow out. Switch the Mode dropdown to Threshold fade if you prefer the binary on/off behavior with activation delays and explicit fade times.
+- **Slider guidance:** Lower the darkness threshold to reserve the boost for truly dark scenes or raise it to catch dim but not fully black footage. Enable "Show detected brightness" if you want a read-only indicator above the slider showing the current averaged luminance percentage, making it easy to align the threshold with live footage. Threshold Duration + Fade In/Out only apply to Threshold fade mode; leave them at their defaults (or hide them entirely) when you stick with Auto brightness. Gamma/Brightness/Contrast/Saturation represent the maximum correction applied when `effect_strength` hits 1, so dial them the way you want pure-black scenes to look.
 
 ## How It Works
 1. **Luminance probe:** Each frame the filter downsamples the source texture to 32×32 on the GPU, stages that tiny texture once, and computes the Rec.709 luminance average. An exponential moving average (α = 0.18) keeps the signal stable.
-2. **State machine:** IDLE → WAITING → FADING_IN → ACTIVE → FADING_OUT transitions control a single `effect_strength` scalar (0–1). Threshold crossings during fades behave gracefully (brightening in FADING_IN immediately pivots to FADING_OUT, etc.).
+2. **Effect strength logic:** Auto brightness maps the smoothed luminance to a proportional `effect_strength` once the scene dips below the threshold, while the Threshold fade mode keeps the IDLE → WAITING → FADING_IN → ACTIVE → FADING_OUT state machine for users who prefer explicit hold timers. Threshold crossings during fades behave gracefully (brightening in FADING_IN immediately pivots to FADING_OUT, etc.).
 3. **Shader blend:** The shader file at `data/shaders/smart-gamma.effect` applies gamma/brightness/contrast/saturation adjustments and lerps with the original frame based on `effect_strength`. Strength 0 returns the untouched frame; strength 1 applies the full correction.
 
 ## Building from Source
