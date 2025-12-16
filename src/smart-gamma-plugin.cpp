@@ -34,6 +34,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("smart-gamma", "en-US")
 
 constexpr char kAuthorWebsite[] = "https://mirko.nz";
 constexpr char kDarknessThresholdPercentKey[] = "darkness_threshold_is_percent";
+constexpr char kShowDetectedLuminanceKey[] = "smart_gamma_show_detected_luminance";
 
 constexpr uint32_t kDefaultDownsampleSize = 32;
 constexpr float kLuminanceSmoothing = 0.18f;
@@ -89,6 +90,7 @@ struct SmartGammaFilter {
 	float time_since_last_sample = 0.0f;
 	std::atomic<float> displayed_luminance_percent{100.0f};
 	float last_properties_update_percent = -1.0f;
+	bool show_detected_luminance = true;
 };
 
 inline float clamp01(float value)
@@ -318,6 +320,9 @@ void UpdateSettingsFromObs(SmartGammaFilter *filter, obs_data_t *settings)
 			break;
 		}
 	}
+
+	filter->show_detected_luminance = obs_data_get_bool(settings, kShowDetectedLuminanceKey);
+	obs_data_set_bool(settings, kShowDetectedLuminanceKey, filter->show_detected_luminance);
 }
 
 float SampleLuminance(SmartGammaFilter *filter)
@@ -439,6 +444,8 @@ void MaybeUpdateLuminanceDisplay(SmartGammaFilter *filter)
 
 	const float percent = clamp01(filter->smoothed_luminance) * 100.0f;
 	filter->displayed_luminance_percent.store(percent, std::memory_order_relaxed);
+	if (!filter->show_detected_luminance)
+		return;
 
 	const bool needs_refresh = filter->last_properties_update_percent < 0.0f ||
 				   std::fabs(percent - filter->last_properties_update_percent) >= 0.5f;
@@ -447,6 +454,18 @@ void MaybeUpdateLuminanceDisplay(SmartGammaFilter *filter)
 
 	filter->last_properties_update_percent = percent;
 	obs_source_update_properties(filter->context);
+}
+
+bool ShowDetectedLuminanceModified(obs_properties_t *props, obs_property_t * /*property*/, obs_data_t *settings)
+{
+	if (!props || !settings)
+		return false;
+
+	const bool enabled = obs_data_get_bool(settings, kShowDetectedLuminanceKey);
+	obs_property_t *info_prop = obs_properties_get(props, "smart_gamma_current_luminance");
+	if (info_prop)
+		obs_property_set_visible(info_prop, enabled);
+	return true;
 }
 
 void UpdateStateMachine(SmartGammaFilter *filter, float delta_seconds, float luminance)
@@ -644,6 +663,14 @@ obs_properties_t *SmartGammaProperties(void *data)
 		obs_property_set_enabled(usage_prop, false);
 	}
 
+	const char *show_label = obs_module_text("SmartGamma.Param.ShowDetectedLuminance");
+	obs_property_t *show_prop = obs_properties_add_bool(props, kShowDetectedLuminanceKey, show_label);
+	if (show_prop) {
+		const char *show_desc = obs_module_text("SmartGamma.Param.ShowDetectedLuminance.Description");
+		obs_property_set_long_description(show_prop, show_desc);
+		obs_property_set_modified_callback(show_prop, ShowDetectedLuminanceModified);
+	}
+
 	const char *current_label = obs_module_text("SmartGamma.Param.CurrentLuminance");
 	obs_property_t *current_luminance_prop =
 		obs_properties_add_text(props, "smart_gamma_current_luminance", current_label, OBS_TEXT_INFO);
@@ -658,6 +685,8 @@ obs_properties_t *SmartGammaProperties(void *data)
 		obs_property_set_long_description(current_luminance_prop, buffer);
 		obs_property_set_enabled(current_luminance_prop, false);
 		obs_property_text_set_info_word_wrap(current_luminance_prop, true);
+		const bool visible = filter ? filter->show_detected_luminance : true;
+		obs_property_set_visible(current_luminance_prop, visible);
 	}
 
 	for (const auto &descriptor : smart_gamma::kParameterDescriptors) {
@@ -695,6 +724,7 @@ void SmartGammaDefaults(obs_data_t *settings)
 		obs_data_set_default_double(settings, descriptor.settings_key, descriptor.default_value);
 	}
 	obs_data_set_default_bool(settings, kDarknessThresholdPercentKey, true);
+	obs_data_set_default_bool(settings, kShowDetectedLuminanceKey, false);
 }
 
 obs_source_info BuildSourceInfo()
